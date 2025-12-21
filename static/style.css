@@ -291,14 +291,7 @@ body { font-family: "Helvetica Neue", Arial, sans-serif; }
 
 /* 小屏适配：减小预留与动作区宽度，保持上下排列 */
 @media (max-width: 576px) {
-  .unit-item { min-height: 80px; padding-right: 92px; }
-  .unit-item .unit-actions { width: 76px; gap: 4px; }
-  .unit-item .unit-actions .btn { font-size: 0.85rem; padding: 6px 6px; }
-}
-
-/* 当列宽非常窄时，动作区可折叠为 inline-block（可选） */
-/* 如果希望在极窄屏直接把按钮移动到行末，解除下面注释并调整 */
-@media (max-width: 420px) {
-  /* .unit-item { padding-right: 16px; }
-  .unit-item .unit-actions { position: static; width: auto; flex-direction: row; gap: 6px; margin-top:6px; } */
+  .unit-item { min-height: 60px; padding-right: 90px; }
+  .unit-item .unit-actions { width: 60px; gap: 3px; }
+  .unit-item .unit-actions .btn { font-size: 0.75rem; padding: 3px 3px; }
 }

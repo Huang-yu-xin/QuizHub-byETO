@@ -9,7 +9,7 @@
 <body class="bg-light d-flex align-items-center justify-content-center" style="height:100vh;">
   <div class="card shadow-sm" style="min-width:360px;">
     <div class="card-body">
-      <h4 class="card-title mb-3 text-center">毛概刷题系统 - byETO</h4>
+      <h4 class="card-title mb-3 text-center">『毛概 & 马原』客观题库刷题系统 - byETO</h4>
       {% if error %}<div class="alert alert-danger">{{error}}</div>{% endif %}
       <form method="post" class="mx-auto" style="max-width:360px;">
         <div class="mb-3">
@@ -22,9 +22,10 @@
           <input id="password" name="password" type="password" class="form-control" required pattern="[A-Za-z0-9]+" />
         </div>
 
-        <!-- 按钮居中 -->
-        <div class="text-center">
-          <button type="submit" class="btn btn-primary">登录</button>
+        <!-- 替换原有单一登录按钮为两个有相同登录功能但不同重定向目标的按钮 -->
+        <div class="d-flex gap-2">
+          <button type="submit" name="course" value="maogai" class="btn btn-primary flex-fill">毛概刷题</button>
+          <button type="submit" name="course" value="mayuan" class="btn btn-secondary flex-fill">马原刷题</button>
         </div>
       </form>
       <hr>

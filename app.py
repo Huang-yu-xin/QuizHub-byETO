@@ -1,49 +1,96 @@
 from flask import Flask, render_template, request, redirect, session, jsonify
-from pathlib import Path
-import json, random, os, re
 from werkzeug.security import check_password_hash, generate_password_hash
+from pathlib import Path
+import json, random, re
 
 APP = Flask(__name__, static_folder="static", template_folder="templates")
 APP.secret_key = "change-me-to-a-secure-random-key"
+USERNAME_RE = re.compile(r'^[A-Za-z0-9]+$')
 
 BASE = Path(__file__).parent
-DB_FILE = BASE / "database.json"
 USERS_FILE = BASE / "users.json"
 USER_DATA_DIR = BASE / "user_data"
 USER_DATA_DIR.mkdir(exist_ok=True)
 
-USERNAME_RE = re.compile(r'^[A-Za-z0-9]+$')  # 只允许字母数字
+if not USERS_FILE.exists():
+    USERS_FILE.write_text(json.dumps({"users": {}, "order": []}, ensure_ascii=False, indent=2), encoding='utf-8')
+with USERS_FILE.open(encoding='utf-8') as f:
+    USERS_DATA = json.load(f)
 
-# load DB (flat map of uid->question and units list)
-if not DB_FILE.exists():
-    raise RuntimeError("请先用 parse_db.py 生成 database.json")
+DB_FILE = BASE / "database.json"
 with DB_FILE.open(encoding='utf-8') as f:
     db = json.load(f)
 
-QUESTIONS = {}  # uid -> question dict
-UNIT_LIST = {}  # unit_name -> [uid,...]
+SECOND_DB_FILE = BASE / "dataset.json"
+with SECOND_DB_FILE.open(encoding='utf-8') as f:
+    db2 = json.load(f)
+
+QUESTIONS = {}
+UNIT_LIST = {}
 for unit, types in db.items():
     for tname, qlist in types.items():
         for q in qlist:
-            # 只使用 uid 字段（parse_db.py 现在保证存在）
             uid = q.get('uid')
             if not uid:
-                # 如果旧数据没有 uid，可以跳过或生成，但推荐先用 parse_db.py 重新生成 database.json
                 continue
             q['unit'] = unit
             q['type'] = tname
             QUESTIONS[uid] = q
             UNIT_LIST.setdefault(unit, []).append(uid)
 
-# users.json 格式：
-# {
-#   "users": { "alice": {"password": "<hash>", "uid": 1}, ... },
-#   "order": ["alice", "bob"]
-# }
-if not USERS_FILE.exists():
-    USERS_FILE.write_text(json.dumps({"users": {}, "order": []}, ensure_ascii=False, indent=2), encoding='utf-8')
-with USERS_FILE.open(encoding='utf-8') as f:
-    USERS_DATA = json.load(f)
+QUESTIONS2 = {}
+UNIT_LIST2 = {}
+
+for kind, groups in db2.items():
+    if kind == "单选":
+        for g in groups:
+            idx = g.get("group_index", 1)
+            unit_name = f"单选题 Part{idx}"
+            uids = []
+            for q in g.get("questions", []):
+                uid = q.get("uid")
+                if not uid:
+                    continue
+                QUESTIONS2[uid] = {
+                    "uid": uid,
+                    "question": q.get("question"),
+                    "options": q.get("options", {}),
+                    "answer": q.get("answer"),
+                    "unit": unit_name,
+                    "type": "选择题"
+                }
+                uids.append(uid)
+            UNIT_LIST2.setdefault(unit_name, []).extend(uids)
+
+    elif kind == "判断":
+        for g in groups:
+            idx = g.get("group_index", 1)
+            unit_name = f"判断题 Part{idx}"
+            uids = []
+            for q in g.get("questions", []):
+                uid = q.get("uid")
+                if not uid:
+                    continue
+                QUESTIONS2[uid] = {
+                    "uid": uid,
+                    "question": q.get("question"),
+                    "options": {"A": "正确", "B": "错误"},
+                    "answer": q.get("answer"),
+                    "unit": unit_name,
+                    "type": "判断题"
+                }
+                uids.append(uid)
+            UNIT_LIST2.setdefault(unit_name, []).extend(uids)
+
+EXP_DB = BASE / "exp_db.json"
+if EXP_DB.exists():
+    with EXP_DB.open(encoding='utf-8') as f:
+        EXPS_DB = json.load(f)
+        
+EXP_DS = BASE / "exp_ds.json"
+if EXP_DS.exists():
+    with EXP_DS.open(encoding='utf-8') as f:
+        EXPS_DS = json.load(f)
 
 
 def reload_users():
@@ -57,31 +104,40 @@ def save_users():
         json.dump(USERS_DATA, f, ensure_ascii=False, indent=2)
 
 
+def default_ud_section():
+    return {
+        "by_unit": {},
+        "last_choice": {},
+        "flags": {"reveal_mode": False, "show_explanations": False},
+        "global": {"wrong": [], "star": []},
+        "progress": {},
+        "current_progress_key": None
+    }
+
+
 def migrate_old_user_data(old):
-    # old -> new with global lists
     new = {"by_unit": {}, "last_choice": {}, "flags": {"reveal_mode": False}, "global": {"wrong": [], "star": []}}
     wrongs = old.get("wrong", []) if isinstance(old, dict) else []
     stars = old.get("star", []) if isinstance(old, dict) else []
-    # distribute to global and unit-level if possible
+
     for uid in wrongs:
         if isinstance(uid, str) and '-' in uid:
             unit_idx = uid.split('-', 1)[0]
-            unit = new["by_unit"].setdefault(unit_idx, {"studied": [], "wrong": [], "star": [],
-                                                        "last_pos": {"studied": 0, "wrong": 0, "star": 0}})
+            unit = new["by_unit"].setdefault(unit_idx, {"studied": [], "wrong": [], "star": [], "last_pos": {"studied": 0, "wrong": 0, "star": 0}})
             if uid not in unit["wrong"]:
                 unit["wrong"].append(uid)
             if uid not in new["global"]["wrong"]:
                 new["global"]["wrong"].append(uid)
+
     for uid in stars:
         if isinstance(uid, str) and '-' in uid:
             unit_idx = uid.split('-', 1)[0]
-            unit = new["by_unit"].setdefault(unit_idx, {"studied": [], "wrong": [], "star": [],
-                                                        "last_pos": {"studied": 0, "wrong": 0, "star": 0}})
+            unit = new["by_unit"].setdefault(unit_idx, {"studied": [], "wrong": [], "star": [], "last_pos": {"studied": 0, "wrong": 0, "star": 0}})
             if uid not in unit["star"]:
                 unit["star"].append(uid)
             if uid not in new["global"]["star"]:
                 new["global"]["star"].append(uid)
-    # migrate progress -> put into studied lists and global last_choice if any
+
     prog = old.get("progress", {}) if isinstance(old, dict) else {}
     if prog:
         for mode, v in prog.items():
@@ -97,16 +153,72 @@ def migrate_old_user_data(old):
     return new
 
 
+def normalize_progress_keys_in_user_data(data):
+    changed = False
+    for course in ("maogai", "mayuan"):
+        sec = data.get(course)
+        if not isinstance(sec, dict):
+            continue
+
+        prog = sec.get("progress", {})
+        for key in list(prog.keys()):
+            if not isinstance(key, str):
+                continue
+            if ':' in key:
+                prefix, rest = key.split(':', 1)
+                if prefix == 'random':
+                    new_key = f"random:{rest}"
+                elif prefix in ("maogai", "mayuan", "sequential", "tag"):
+                    new_key = rest
+                else:
+                    continue
+                if new_key != key:
+                    if new_key not in prog:
+                        prog[new_key] = prog.pop(key)
+                    else:
+                        prog.pop(key, None)
+                    changed = True
+
+        cpk = sec.get("current_progress_key")
+        if isinstance(cpk, str) and ':' in cpk:
+            prefix, rest = cpk.split(':', 1)
+            if prefix in ("maogai", "mayuan", "sequential", "tag"):
+                sec["current_progress_key"] = rest
+                changed = True
+        sec["progress"] = prog
+    if changed:
+        return True
+    return False
+
+
+def get_unit_name_by_uid(uid, course):
+    QUESTIONS_X, _ = get_dataset(course)
+    q = QUESTIONS_X.get(uid)
+    if not q:
+        return None
+    return q.get('unit')
+
+
 def load_user_data(username):
     p = USER_DATA_DIR / f"{username}.json"
     if p.exists():
         data = json.load(p.open(encoding='utf-8'))
-        if not ("by_unit" in data and "last_choice" in data and "flags" in data and "global" in data):
-            data = migrate_old_user_data(data)
-            save_user_data(username, data)
-        return data
-    data = {"by_unit": {}, "last_choice": {}, "flags": {"reveal_mode": False}, "global": {"wrong": [], "star": []},
-            "progress": {}}
+        if isinstance(data, dict) and ("maogai" in data or "mayuan" in data):
+            data.setdefault("maogai", default_ud_section())
+            data.setdefault("mayuan", default_ud_section())
+            if normalize_progress_keys_in_user_data(data):
+                save_user_data(username, data)
+            return data
+
+        new = {"maogai": default_ud_section(), "mayuan": default_ud_section()}
+        if isinstance(data, dict):
+            new["maogai"].update(data)
+
+        normalize_progress_keys_in_user_data(new)
+        save_user_data(username, new)
+        return new
+
+    data = {"maogai": default_ud_section(), "mayuan": default_ud_section()}
     p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
     return data
 
@@ -116,12 +228,13 @@ def save_user_data(username, data):
     p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
 
 
-# 加载解析数据
-EXPLANATIONS = {}
-EXPLANATION_FILE = BASE / "explanations.json"
-if EXPLANATION_FILE.exists():
-    with EXPLANATION_FILE.open(encoding='utf-8') as f:
-        EXPLANATIONS = json.load(f)
+def get_user_section(username, course, create=True):
+    ud_all = load_user_data(username)
+    if course not in ud_all:
+        if not create:
+            return ud_all, None
+        ud_all[course] = default_ud_section()
+    return ud_all, ud_all[course]
 
 
 @APP.context_processor
@@ -141,27 +254,34 @@ def login():
     if request.method == "POST":
         u = request.form.get("username", "").strip()
         pw = request.form.get("password", "")
+        course = request.form.get("course", "maogai") or "maogai"
+
         if not u or not pw:
             return render_template("login.html", error="用户名或密码不能为空")
         if not USERNAME_RE.match(u) or not USERNAME_RE.match(pw):
             return render_template("login.html", error="用户名和密码只允许字母和数字")
+
         reload_users()
         user = USERS_DATA.get("users", {}).get(u)
+
         if user:
-            # 已有用户，校验密码
             if check_password_hash(user["password"], pw):
                 session['user'] = u
-                return redirect("/dashboard")
+                session['course'] = course
+                return redirect(f"/dashboard/{course}")
             else:
                 return render_template("login.html", error="用户名已存在但密码错误")
+
         else:
-            # 用户不存在 -> 自动注册并登录
             next_uid = len(USERS_DATA.get("order", [])) + 1
             USERS_DATA.setdefault("users", {})[u] = {"password": generate_password_hash(pw), "uid": next_uid}
             USERS_DATA.setdefault("order", []).append(u)
+
             save_users()
             session['user'] = u
-            return redirect("/dashboard")
+            session['course'] = course
+            return redirect(f"/dashboard/{course}")
+
     return render_template("login.html")
 
 
@@ -176,12 +296,12 @@ def register():
     reload_users()
     if u in USERS_DATA.get("users", {}):
         return jsonify({"error": "用户名已存在"}), 400
-    # 分配顺序 uid（注册顺序，从1开始）
     next_uid = len(USERS_DATA.get("order", [])) + 1
     USERS_DATA.setdefault("users", {})[u] = {"password": generate_password_hash(pw), "uid": next_uid}
     USERS_DATA.setdefault("order", []).append(u)
     save_users()
     session['user'] = u
+    session['course'] = request.form.get("course") or "maogai"
     return jsonify({"ok": True, "uid": next_uid})
 
 
@@ -195,98 +315,190 @@ def logout():
 def dashboard():
     if 'user' not in session:
         return redirect("/login")
-    # 向前端传 units 和用户信息
-    user_info = USERS_DATA.get("users", {}).get(session['user'])
-    return render_template("dashboard.html", units=list(UNIT_LIST.keys()), user_info=user_info)
+    course = session.get('course', 'maogai')
+    if course not in ("maogai", "mayuan"):
+        course = 'maogai'
+    return redirect(f"/dashboard/{course}")
 
 
-@APP.route("/quiz")
-def quiz_page():
+@APP.route("/dashboard/<course>")
+def dashboard_course(course):
     if 'user' not in session:
         return redirect("/login")
-    return render_template("quiz.html")
+    if course not in ("maogai", "mayuan"):
+        return redirect("/dashboard/maogai")
+    session['course'] = course
+    QUESTIONS_X, UNIT_LIST_X = get_dataset(course)
+    user_info = USERS_DATA.get("users", {}).get(session['user'])
+    units = list(UNIT_LIST_X.keys())
+    return render_template("dashboard.html", units=units, user_info=user_info, course=course)
+
+
+def get_dataset(course):
+    if course == "mayuan" and QUESTIONS2:
+        return QUESTIONS2, UNIT_LIST2
+    return QUESTIONS, UNIT_LIST
+
+
+def get_request_json():
+    if request.is_json:
+        try:
+            return request.get_json(silent=True) or {}
+        except Exception:
+            return {}
+    try:
+        text = request.get_data(as_text=True)
+        if text:
+            return json.loads(text)
+    except Exception:
+        pass
+    try:
+        if request.form:
+            return request.form.to_dict()
+    except Exception:
+        pass
+    return {}
 
 
 @APP.route("/api/start", methods=["POST"])
 def api_start():
     if 'user' not in session:
         return jsonify({"error": "not logged"}), 401
-    j = request.json or {}
+
+    j = get_request_json()
     mode = j.get("mode", "random")
     reveal = bool(j.get("reveal", False))
+
     tag = j.get("tag")
     username = session['user']
+    course = j.get("course") or session.get('course') or "maogai"
+    if course not in ("maogai", "mayuan"):
+        return jsonify({"error": "invalid course"}), 400
 
-    ud = load_user_data(username)
+    session['course'] = course
+    QUESTIONS_X, UNIT_LIST_X = get_dataset(course)
+    ud_all, ud = get_user_section(username, course)
 
     if mode == "sequential":
-        unit = j.get("unit")
-        progress_key = "sequential" if unit is None else f"sequential:{unit}"
-        # 如果已有该单元的进度，恢复之（包括 list 和 pos），否则新建并从头开始
+        unit_raw = j.get("unit")
+        if unit_raw:
+            if unit_raw not in UNIT_LIST_X:
+                return jsonify({"error": "unit not found", "unit_requested": unit_raw}), 400
+            unit_key = unit_raw
+        else:
+            unit_key = None
+
+        progress_key = unit_key if unit_key else "sequential_all"
         existing = ud.get("progress", {}).get(progress_key)
+
         if existing:
             ulist = existing.get("list", [])
             pos = existing.get("pos", 0)
-            # 接受前端传入的 reveal（优先），若未传入则使用已有值
             reveal_param = j.get("reveal")
+
             if reveal_param is None:
                 reveal = existing.get("reveal", reveal)
             else:
                 reveal = bool(reveal_param)
-                # 更新已有进度的 reveal 标志
                 ud.setdefault("progress", {}).setdefault(progress_key, {})['reveal'] = reveal
         else:
-            ulist = UNIT_LIST.get(unit, [])
+            ulist = UNIT_LIST_X.get(unit_key, [])
             pos = 0
             ud.setdefault("progress", {})[progress_key] = {"list": ulist, "pos": pos, "reveal": reveal}
-        # 记录当前进度键
+
         ud["current_progress_key"] = progress_key
-        save_user_data(username, ud)
-        return jsonify({"list": ulist, "pos": pos, "reveal": reveal, "key": progress_key, "mode": mode, "unit": unit})
+        save_user_data(username, ud_all)
+        return jsonify({"list": ulist, "pos": pos, "reveal": reveal, "key": progress_key, "mode": mode, "unit": unit_key})
 
     elif mode == "tag":
         if not tag:
             return jsonify({"error": "tag required for tag mode"}), 400
-        # 使用全局列表（global）中的题目，确保只包含 global.wrong 或 global.star
         if tag == "wrong":
             ulist = ud.get("global", {}).get("wrong", [])[:]
         elif tag == "star":
             ulist = ud.get("global", {}).get("star", [])[:]
         else:
             ulist = []
-        progress_key = f"tag:{tag}"
+
+        progress_key = tag
         ud.setdefault("progress", {})[progress_key] = {"list": ulist, "pos": 0, "reveal": reveal}
         ud["current_progress_key"] = progress_key
-        save_user_data(username, ud)
+        save_user_data(username, ud_all)
         return jsonify({"list": ulist, "pos": 0, "reveal": reveal, "key": progress_key, "mode": mode, "tag": tag})
 
     else:
-        # random mode: 默认每次取 50 题，并覆盖 progress，保证每次进入都重新抽题
         count = int(j.get("count", 50))
-        all_uids = list(QUESTIONS.keys())
+        all_uids = list(QUESTIONS_X.keys())
         ulist = random.sample(all_uids, min(count, len(all_uids)))
         progress_key = f"random:{count}"
         ud.setdefault("progress", {})[progress_key] = {"list": ulist, "pos": 0, "reveal": reveal}
         ud["current_progress_key"] = progress_key
-        save_user_data(username, ud)
-        return jsonify({"list": ulist, "pos": 0, "reveal": reveal, "key": progress_key, "mode": mode, "count": count})
+        save_user_data(username, ud_all)
+        return jsonify({"list": ulist, "pos": 0, "reveal": reveal, "key": progress_key, "mode": mode, "count": count, "course": course})
+
+
+@APP.route("/quiz")
+def quiz_root():
+    if 'user' not in session:
+        return redirect("/login")
+    course = session.get('course', 'maogai')
+    if course not in ("maogai", "mayuan"):
+        return redirect(f"/login")
+    return redirect(f"/quiz/{course}")
+
+
+@APP.route("/quiz/<course>")
+def quiz_page(course):
+    if 'user' not in session:
+        return redirect("/login")
+    if course not in ("maogai", "mayuan"):
+        return redirect("/dashboard/maogai")
+
+    session['course'] = course
+    QUESTIONS_X, UNIT_LIST_X = get_dataset(course)
+    username = session['user']
+    ud_all, ud = get_user_section(username, course)
+    prog = ud.get("progress", {}) or {}
+
+    if not prog:
+        first_unit_canonical = None
+        if isinstance(UNIT_LIST_X, dict) and len(UNIT_LIST_X) > 0:
+            for k in UNIT_LIST_X.keys():
+                first_unit_canonical = k
+                break
+        if first_unit_canonical:
+            default_list = UNIT_LIST_X.get(first_unit_canonical, [])[:]
+            progress_key = first_unit_canonical
+            ud.setdefault("progress", {})[progress_key] = {"list": default_list, "pos": 0, "reveal": False}
+            ud["current_progress_key"] = progress_key
+            save_user_data(username, ud_all)
+
+    return render_template("quiz.html", course=course)
 
 
 @APP.route("/api/question", methods=["GET"])
 def api_question():
     if 'user' not in session:
         return jsonify({"error": "not logged"}), 401
+
     uid = request.args.get("uid")
     reveal = request.args.get("reveal") == "1"
-    q = QUESTIONS.get(uid)
+    course = request.args.get("course") or session.get("course")
+    if not course or course not in ("maogai", "mayuan"):
+        return jsonify({"error": "course required"}), 400
+
+    QUESTIONS_X, _ = get_dataset(course)
+    q = QUESTIONS_X.get(uid)
     if not q:
-        return jsonify({"error": "no such question"}), 404
+        return jsonify({"error": "no such question in course"}), 404
     out = {"uid": uid, "question": q.get("question"), "options": q.get("options", {}), "type": q.get("type")}
+
     if reveal:
         out["answer"] = q.get("answer")
-    # 附加解析（若存在）
-    if uid in EXPLANATIONS:
-        out["explanation"] = EXPLANATIONS[uid]
+    # 根据 course 使用对应的解析库（maogai -> EXPS_DB, mayuan -> EXPS_DS）
+    exps = EXPS_DS if course == "mayuan" else EXPS_DB
+    if exps and uid in exps:
+        out["explanation"] = exps[uid]
     return jsonify(out)
 
 
@@ -294,22 +506,25 @@ def api_question():
 def api_answer():
     if 'user' not in session:
         return jsonify({"error": "not logged"}), 401
-    j = request.json or {}
+
+    j = get_request_json()
     uid = j.get("uid")
     selected = j.get("selected")
-    username = session['user']
-    q = QUESTIONS.get(uid)
+    course = j.get("course") or session.get("course")
+    if not course or course not in ("maogai", "mayuan"):
+        return jsonify({"error": "course required"}), 400
+
+    QUESTIONS_X, _ = get_dataset(course)
+    q = QUESTIONS_X.get(uid)
+    if not q:
+        return jsonify({"error": "no such question in course"}), 404
     correct = q.get("answer")
-    is_correct = False
-    if isinstance(correct, list):
-        is_correct = set(selected or []) == set(correct)
-    else:
-        is_correct = (selected == correct)
-    ud = load_user_data(username)
-    # update unit-level studied and wrong
-    unit_idx = str(uid).split('-', 1)[0] if isinstance(uid, str) and '-' in uid else "0"
-    unit = ud.setdefault("by_unit", {}).setdefault(unit_idx, {"studied": [], "wrong": [], "star": [],
-                                                              "last_pos": {"studied": 0, "wrong": 0, "star": 0}})
+    username = session['user']
+    is_correct = (set(selected or []) == set(correct)) if isinstance(correct, list) else (selected == correct)
+    ud_all, ud = get_user_section(username, course)
+
+    unit_name = q.get('unit') or "未知单元"
+    unit = ud.setdefault("by_unit", {}).setdefault(unit_name, {"studied": [], "wrong": [], "star": [], "last_pos": {"studied": 0, "wrong": 0, "star": 0}})
     if not is_correct:
         if uid not in unit["wrong"]:
             unit["wrong"].append(uid)
@@ -318,7 +533,7 @@ def api_answer():
             unit["wrong"].remove(uid)
     if uid not in unit["studied"]:
         unit["studied"].append(uid)
-    # update global wrong list
+
     gl = ud.setdefault("global", {"wrong": [], "star": []})
     if not is_correct:
         if uid not in gl["wrong"]:
@@ -326,9 +541,9 @@ def api_answer():
     else:
         if uid in gl["wrong"]:
             gl["wrong"].remove(uid)
-    # record last choice
+
     ud.setdefault("last_choice", {})[uid] = {"correct": is_correct, "selected": selected}
-    save_user_data(username, ud)
+    save_user_data(username, ud_all)
     return jsonify({"correct": is_correct, "answer": correct})
 
 
@@ -336,19 +551,25 @@ def api_answer():
 def api_star():
     if 'user' not in session:
         return jsonify({"error": "not logged"}), 401
-    j = request.json or {}
+
+    j = get_request_json()
     uid = j.get("uid")
     action = j.get("action", "toggle")
+    course = j.get("course") or session.get("course")
+    if not course or course not in ("maogai", "mayuan"):
+        return jsonify({"error": "course required"}), 400
     username = session['user']
-    ud = load_user_data(username)
-    unit_idx = str(uid).split('-', 1)[0] if isinstance(uid, str) and '-' in uid else "0"
-    unit = ud.setdefault("by_unit", {}).setdefault(unit_idx, {"studied": [], "wrong": [], "star": [],
-                                                              "last_pos": {"studied": 0, "wrong": 0, "star": 0}})
+    ud_all, ud = get_user_section(username, course)
+
+    QUESTIONS_X, _ = get_dataset(course)
+    q = QUESTIONS_X.get(uid)
+    unit_name = q.get('unit') if q else "未知单元"
+    unit = ud.setdefault("by_unit", {}).setdefault(unit_name, {"studied": [], "wrong": [], "star": [], "last_pos": {"studied": 0, "wrong": 0, "star": 0}})
     gl = ud.setdefault("global", {"wrong": [], "star": []})
+
     if action == "toggle":
         if uid in gl["star"]:
             gl["star"].remove(uid)
-            # also remove unit-level star if present
             if uid in unit["star"]:
                 unit["star"].remove(uid)
             state = False
@@ -359,7 +580,7 @@ def api_star():
             state = True
     else:
         state = uid in gl["star"]
-    save_user_data(username, ud)
+    save_user_data(username, ud_all)
     return jsonify({"starred": state})
 
 
@@ -367,32 +588,33 @@ def api_star():
 def api_clear_unit():
     if 'user' not in session:
         return jsonify({"error": "not logged"}), 401
-    j = request.json or {}
-    unit_name = j.get("unit")
+    j = get_request_json()
+    unit_name = j.get("unit") or request.form.get("unit")
+    course = j.get("course") or session.get("course")
+    if not course or course not in ("maogai", "mayuan"):
+        return jsonify({"error": "course required"}), 400
     if not unit_name:
         return jsonify({"error": "no unit"}), 400
-    # find uid list for this unit
-    ulist = UNIT_LIST.get(unit_name, [])
+    QUESTIONS_X, UNIT_LIST_X = get_dataset(course)
+    if unit_name not in UNIT_LIST_X:
+        return jsonify({"error": "unit not found", "unit_requested": unit_name}), 404
+    unit_key = unit_name
+    ulist = UNIT_LIST_X.get(unit_key, [])
     if not ulist:
         return jsonify({"error": "unit not found"}), 404
-    # derive unit_idx from first uid
-    first = ulist[0]
-    unit_idx = first.split('-', 1)[0] if '-' in first else None
     username = session['user']
-    ud = load_user_data(username)
-    if unit_idx and unit_idx in ud.get("by_unit", {}):
-        # 清除单元内记录：studied、wrong、star 与 last_pos（但不改全局 global）
-        ud["by_unit"][unit_idx]["studied"] = []
-        ud["by_unit"][unit_idx]["wrong"] = []
-        ud["by_unit"][unit_idx]["star"] = []
-        ud["by_unit"][unit_idx]["last_pos"] = {"studied": 0, "wrong": 0, "star": 0}
-        # 同时删除该单元下的 last_choice 条目（仅单元级历史选择）
+    ud_all, ud = get_user_section(username, course)
+    if unit_key and unit_key in ud.get("by_unit", {}):
+        ud["by_unit"][unit_key]["studied"] = []
+        ud["by_unit"][unit_key]["wrong"] = []
+        ud["by_unit"][unit_key]["star"] = []
+        ud["by_unit"][unit_key]["last_pos"] = {"studied": 0, "wrong": 0, "star": 0}
         lc = ud.get("last_choice", {})
-        to_del = [k for k in lc.keys() if isinstance(k, str) and k.startswith(f"{unit_idx}-")]
+        to_del = [k for k in lc.keys() if isinstance(k, str) and k.startswith(tuple([u + "-" for u in ulist]))]
         for k in to_del:
             lc.pop(k, None)
         ud["last_choice"] = lc
-        save_user_data(username, ud)
+        save_user_data(username, ud_all)
         return jsonify({"ok": True})
     return jsonify({"error": "no data for unit"}), 404
 
@@ -402,14 +624,16 @@ def api_flags():
     if 'user' not in session:
         return jsonify({"error": "not logged"}), 401
     username = session['user']
-    ud = load_user_data(username)
+    j = get_request_json()
+    course = request.args.get("course") or j.get("course") or session.get("course")
+    if not course or course not in ("maogai", "mayuan"):
+        return jsonify({"error": "course required"}), 400
+    ud_all, ud = get_user_section(username, course)
     if request.method == "GET":
         return jsonify(ud.get("flags", {}))
-    j = request.json or {}
-    # allow set {"reveal_mode": true/false, "show_explanations": true/false}
     for k, v in j.items():
         ud.setdefault("flags", {})[k] = bool(v)
-    save_user_data(username, ud)
+    save_user_data(username, ud_all)
     return jsonify(ud.get("flags", {}))
 
 
@@ -417,18 +641,19 @@ def api_flags():
 def api_progress_save():
     if 'user' not in session:
         return jsonify({"error": "not logged"}), 401
-    j = request.json or {}
-    # 优先使用 key（新的方式），兼容旧的 mode 字段
+    j = get_request_json()
     key = j.get("key") or j.get("mode")
     pos = j.get("pos", 0)
     username = session['user']
     if not key:
         return jsonify({"error": "no progress key provided"}), 400
-    ud = load_user_data(username)
+    course = j.get("course") or session.get("course")
+    if not course or course not in ("maogai", "mayuan"):
+        return jsonify({"error": "course required"}), 400
+    ud_all, ud = get_user_section(username, course)
     ud.setdefault("progress", {}).setdefault(key, {})['pos'] = pos
-    # 同步 current_progress_key（可选，确保一致）
     ud["current_progress_key"] = key
-    save_user_data(username, ud)
+    save_user_data(username, ud_all)
     return jsonify({"ok": True})
 
 
@@ -436,8 +661,12 @@ def api_progress_save():
 def api_user_data():
     if 'user' not in session:
         return jsonify({"error": "not logged"}), 401
-    ud = load_user_data(session['user'])
-    return jsonify(ud)
+    course = request.args.get("course") or session.get("course")
+    username = session['user']
+    ud_all = load_user_data(username)
+    if course and course in ("maogai", "mayuan"):
+        return jsonify(ud_all.get(course, default_ud_section()))
+    return jsonify(ud_all)
 
 
 if __name__ == "__main__":
