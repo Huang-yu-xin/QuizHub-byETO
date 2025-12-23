@@ -308,28 +308,17 @@ async function loadQuestion(){
     // tag 模式：不显示反馈；其他模式正常显示
     if(!isTagMode){
       if(revealMode){
-        // 背题模式：不显示反馈
+        // 背题模式：不显示反馈（保持原逻辑）
       } else if(last){
         document.getElementById('feedback').innerText = last.correct ? '✓ 回答正确' : ('✗ 回答错误，正确答案: ' + (Array.isArray(q.answer) ? JSON.stringify(q.answer) : q.answer));
       }
     }
 
-    if((revealMode || (explainMode && last && !isTagMode)) && q.explanation){
+    // 仅当“显示解析”开启时并且不是 tag 模式才展示解析（背题模式不再强制开启解析）
+    if(explainMode && q.explanation){
       const feedbackDiv = document.getElementById('feedback');
       const explainDiv = document.createElement('div');
-      
-      explainDiv.id = explainDiv.id || 'explanation-box';
-      explainDiv.style.display = 'block';
-      explainDiv.style.width = '100%';
-      explainDiv.style.boxSizing = 'border-box';
-      
-      const leftCol = feedbackDiv && feedbackDiv.parentElement;
-      const controlRow = leftCol && leftCol.parentElement;
-      if (controlRow && controlRow.parentElement) {
-        controlRow.parentElement.insertBefore(explainDiv, controlRow.nextSibling);
-      } else if (feedbackDiv && feedbackDiv.parentElement) {
-        feedbackDiv.parentElement.insertBefore(explainDiv, feedbackDiv.nextSibling);
-      }
+      explainDiv.id = 'explanation-box';
       explainDiv.style.marginTop = '12px';
       explainDiv.style.padding = '10px';
       explainDiv.style.backgroundColor = '#f0f8ff';
@@ -337,6 +326,7 @@ async function loadQuestion(){
       explainDiv.style.fontSize = '13px';
       explainDiv.style.lineHeight = '1.5';
       explainDiv.innerText = '💡 ' + q.explanation;
+      feedbackDiv.parentElement.insertBefore(explainDiv, feedbackDiv.nextSibling);
     }
   }
 
@@ -393,6 +383,13 @@ async function submitAnswerSingle(uid, selected){
   // tag/random 模式：不要写入后端持久记录，仅记录到 tempQA，防止本模式内重复作答
   if(isTagMode){
     tempQA[uid] = {"correct": r.correct, "selected": selected};
+
+    // 在特殊模式下也显示“答案”（不是解析）
+    const fb = document.getElementById('feedback');
+    if(fb){
+      fb.innerText = r.correct ? '✓ 回答正确' : ('✗ 回答错误，答案: ' + (Array.isArray(r.answer) ? JSON.stringify(r.answer) : r.answer));
+    }
+    
     // 显示解析（如启用）
     if(explainMode && currentQuestion.explanation){
       const feedbackDiv = document.getElementById('feedback');
@@ -499,6 +496,13 @@ async function submitAnswerMulti(uid){
 
   if(isTagMode){
     tempQA[uid] = {"correct": r.correct, "selected": selectedArr};
+
+    // 在特殊模式下也显示“答案”（不是解析）
+    const fb = document.getElementById('feedback');
+    if(fb){
+      fb.innerText = r.correct ? '✓ 回答正确' : ('✗ 回答错误，答案: ' + (Array.isArray(r.answer) ? JSON.stringify(r.answer) : r.answer));
+    }
+    
     if(explainMode && currentQuestion.explanation){
       const feedbackDiv = document.getElementById('feedback');
       const explainDiv = document.createElement('div');
