@@ -315,18 +315,8 @@ async function loadQuestion(){
     }
 
     // 仅当“显示解析”开启时并且不是 tag 模式才展示解析（背题模式不再强制开启解析）
-    if(explainMode && q.explanation){
-      const feedbackDiv = document.getElementById('feedback');
-      const explainDiv = document.createElement('div');
-      explainDiv.id = 'explanation-box';
-      explainDiv.style.marginTop = '12px';
-      explainDiv.style.padding = '10px';
-      explainDiv.style.backgroundColor = '#f0f8ff';
-      explainDiv.style.borderLeft = '4px solid #0d6efd';
-      explainDiv.style.fontSize = '13px';
-      explainDiv.style.lineHeight = '1.5';
-      explainDiv.innerText = '💡 ' + q.explanation;
-      feedbackDiv.parentElement.insertBefore(explainDiv, feedbackDiv.nextSibling);
+    if(explainMode && q.explanation && !isTagMode){
+      insertExplanation(q.explanation);
     }
   }
 
@@ -392,28 +382,7 @@ async function submitAnswerSingle(uid, selected){
     
     // 显示解析（如启用）
     if(explainMode && currentQuestion.explanation){
-      const feedbackDiv = document.getElementById('feedback');
-      const explainDiv = document.createElement('div');
-      
-      explainDiv.id = explainDiv.id || 'explanation-box';
-      explainDiv.style.display = 'block';
-      explainDiv.style.width = '100%';
-      explainDiv.style.boxSizing = 'border-box';
-      
-      const leftCol = feedbackDiv && feedbackDiv.parentElement;
-      const controlRow = leftCol && leftCol.parentElement;
-      if (controlRow && controlRow.parentElement) {
-        controlRow.parentElement.insertBefore(explainDiv, controlRow.nextSibling);
-      } else if (feedbackDiv && feedbackDiv.parentElement) {
-        feedbackDiv.parentElement.insertBefore(explainDiv, feedbackDiv.nextSibling);
-      }
-      explainDiv.style.marginTop = '12px';
-      explainDiv.style.padding = '10px';
-      explainDiv.style.backgroundColor = '#f0f8ff';
-      explainDiv.style.borderLeft = '4px solid #0d6efd';
-      explainDiv.style.fontSize = '13px';
-      explainDiv.style.lineHeight = '1.5';
-      explainDiv.innerText = '💡 ' + currentQuestion.explanation;
+      insertExplanation(currentQuestion.explanation);
     }
     const optsArr = document.querySelectorAll('#opts .option-btn');
     optsArr.forEach(btn=>{ btn.onclick = null; btn.style.pointerEvents = 'none'; });
@@ -441,28 +410,7 @@ async function submitAnswerSingle(uid, selected){
   optsArr.forEach(btn=>{ btn.onclick = null; btn.style.pointerEvents = 'none'; });
   
   if(explainMode && currentQuestion.explanation){
-    const feedbackDiv = document.getElementById('feedback');
-    const explainDiv = document.createElement('div');
-    
-    explainDiv.id = explainDiv.id || 'explanation-box';
-    explainDiv.style.display = 'block';
-    explainDiv.style.width = '100%';
-    explainDiv.style.boxSizing = 'border-box';
-    
-    const leftCol = feedbackDiv && feedbackDiv.parentElement;
-    const controlRow = leftCol && leftCol.parentElement;
-    if (controlRow && controlRow.parentElement) {
-      controlRow.parentElement.insertBefore(explainDiv, controlRow.nextSibling);
-    } else if (feedbackDiv && feedbackDiv.parentElement) {
-      feedbackDiv.parentElement.insertBefore(explainDiv, feedbackDiv.nextSibling);
-    }
-    explainDiv.style.marginTop = '12px';
-    explainDiv.style.padding = '10px';
-    explainDiv.style.backgroundColor = '#f0f8ff';
-    explainDiv.style.borderLeft = '4px solid #0d6efd';
-    explainDiv.style.fontSize = '13px';
-    explainDiv.style.lineHeight = '1.5';
-    explainDiv.innerText = '💡 ' + currentQuestion.explanation;
+    insertExplanation(currentQuestion.explanation);
   }
   
   await saveProgress();
@@ -504,28 +452,7 @@ async function submitAnswerMulti(uid){
     }
     
     if(explainMode && currentQuestion.explanation){
-      const feedbackDiv = document.getElementById('feedback');
-      const explainDiv = document.createElement('div');
-      
-      explainDiv.id = explainDiv.id || 'explanation-box';
-      explainDiv.style.display = 'block';
-      explainDiv.style.width = '100%';
-      explainDiv.style.boxSizing = 'border-box';
-
-      const leftCol = feedbackDiv && feedbackDiv.parentElement;
-      const controlRow = leftCol && leftCol.parentElement;
-      if (controlRow && controlRow.parentElement) {
-        controlRow.parentElement.insertBefore(explainDiv, controlRow.nextSibling);
-      } else if (feedbackDiv && feedbackDiv.parentElement) {
-        feedbackDiv.parentElement.insertBefore(explainDiv, feedbackDiv.nextSibling);
-      }
-      explainDiv.style.marginTop = '12px';
-      explainDiv.style.padding = '10px';
-      explainDiv.style.backgroundColor = '#f0f8ff';
-      explainDiv.style.borderLeft = '4px solid #0d6efd';
-      explainDiv.style.fontSize = '13px';
-      explainDiv.style.lineHeight = '1.5';
-      explainDiv.innerText = '💡 ' + currentQuestion.explanation;
+      insertExplanation(currentQuestion.explanation);
     }
     const optsArr = document.querySelectorAll('#opts .option-btn');
     optsArr.forEach(btn=>{ btn.onclick = null; btn.style.pointerEvents = 'none'; });
@@ -552,28 +479,7 @@ async function submitAnswerMulti(uid){
   optsArr.forEach(btn=>{ btn.onclick = null; btn.style.pointerEvents = 'none'; });
   
   if(explainMode && currentQuestion.explanation){
-    const feedbackDiv = document.getElementById('feedback');
-    const explainDiv = document.createElement('div');
-    
-    explainDiv.id = explainDiv.id || 'explanation-box';
-    explainDiv.style.display = 'block';
-    explainDiv.style.width = '100%';
-    explainDiv.style.boxSizing = 'border-box';
-    
-    const leftCol = feedbackDiv && feedbackDiv.parentElement;
-    const controlRow = leftCol && leftCol.parentElement;
-    if (controlRow && controlRow.parentElement) {
-      controlRow.parentElement.insertBefore(explainDiv, controlRow.nextSibling);
-    } else if (feedbackDiv && feedbackDiv.parentElement) {
-      feedbackDiv.parentElement.insertBefore(explainDiv, feedbackDiv.nextSibling);
-    }
-    explainDiv.style.marginTop = '12px';
-    explainDiv.style.padding = '10px';
-    explainDiv.style.backgroundColor = '#f0f8ff';
-    explainDiv.style.borderLeft = '4px solid #0d6efd';
-    explainDiv.style.fontSize = '13px';
-    explainDiv.style.lineHeight = '1.5';
-    explainDiv.innerText = '💡 ' + currentQuestion.explanation;
+    insertExplanation(currentQuestion.explanation);
   }
   
   await saveProgress();
@@ -624,3 +530,45 @@ async function savePos(){
 window.onload = loadProgressList;
 window.addEventListener('resize', ()=>{ adjustGridSize(); });
 window.addEventListener('load', ()=>{ setTimeout(adjustGridSize, 80); });
+
+function insertExplanation(explanation){
+  if(!explanation) return;
+  
+  // 移除已存在的解析框
+  const existing = document.getElementById('explanation-box');
+  if(existing) existing.remove();
+  
+  const feedbackDiv = document.getElementById('feedback');
+  const prevBtn = document.getElementById('prevBtn');
+  const nextBtn = document.getElementById('nextBtn');
+  
+  if(!feedbackDiv) return;
+  
+  const explainDiv = document.createElement('div');
+  explainDiv.id = 'explanation-box';
+  explainDiv.style.marginTop = '12px';
+  explainDiv.style.padding = '10px';
+  explainDiv.style.backgroundColor = '#f0f8ff';
+  explainDiv.style.borderLeft = '4px solid #0d6efd';
+  explainDiv.style.fontSize = '13px';
+  explainDiv.style.lineHeight = '1.5';
+  explainDiv.style.width = '100%';
+  explainDiv.style.boxSizing = 'border-box';
+  explainDiv.innerText = '💡 ' + explanation;
+  
+  // 找到最高的公共父容器（包含 feedback 和按钮的容器）
+  // 通常按钮会在同一个父元素中
+  let insertAfter = feedbackDiv;
+  if(nextBtn && nextBtn.parentElement){
+    insertAfter = nextBtn.parentElement;
+  } else if(prevBtn && prevBtn.parentElement){
+    insertAfter = prevBtn.parentElement;
+  }
+  
+  const commonParent = insertAfter.parentElement;
+  if(commonParent){
+    commonParent.insertBefore(explainDiv, insertAfter.nextSibling);
+  } else {
+    feedbackDiv.parentElement.appendChild(explainDiv);
+  }
+}
