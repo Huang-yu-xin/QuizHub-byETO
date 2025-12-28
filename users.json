@@ -1,0 +1,11 @@
+{
+  "users": {
+    "testuser": {
+      "password": "scrypt:32768:8:1$0mziWSOt60UbZMjd$ceae56ca69c60cd2900ec39f05b8c47a9c05321d792f3a81fa521b2f55462d15c7e3bddcb16d0591793f400a889cc274150874cebcce756fa6d0cc3bdd3e239e",
+      "uid": 1
+    }
+  },
+  "order": [
+    "testuser"
+  ]
+}
