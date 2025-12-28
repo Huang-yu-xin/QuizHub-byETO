@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, session, jsonify
+from flask import Flask, render_template, request, redirect, session, jsonify, send_from_directory
 from werkzeug.security import check_password_hash, generate_password_hash
 from pathlib import Path
 import webbrowser
@@ -254,6 +254,15 @@ def get_user_section(username, course, create=True):
 @APP.context_processor
 def inject_user():
     return dict(session=session)
+
+
+@APP.route('/favicon.ico')
+def favicon():
+    return send_from_directory(
+        RES_BASE,
+        '归终.ico',
+        mimetype='image/vnd.microsoft.icon'
+    )
 
 
 @APP.route("/")
